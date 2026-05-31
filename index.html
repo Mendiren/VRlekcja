@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wirtualna Klasa VR - Projekt Mendi</title>
-    <!-- Pobranie biblioteki A-Frame do obsługi VR w przeglądarce -->
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
@@ -19,13 +18,38 @@
             padding: 15px;
             border-radius: 8px;
             pointer-events: auto;
-            width: 300px;
+            width: 320px;
         }
     </style>
     <script>
+        // FIX: Aktywne zapobieganie błędowi Pointer Lock Cooldown
+        let isPointerLockCooldown = false;
+        
+        document.addEventListener('pointerlockchange', () => {
+            if (!document.pointerLockElement) {
+                // Użytkownik wyszedł z trybu Pointer Lock (np. wciskając ESC)
+                isPointerLockCooldown = true;
+                setTimeout(() => {
+                    isPointerLockCooldown = false;
+                }, 1300); // Blokada na 1.3 sekundy (wymóg bezpieczeństwa przeglądarek)
+            }
+        });
+
+        // Przechwycenie kliknięcia w fazie capture, zanim dotrze do A-Frame
+        window.addEventListener('mousedown', (e) => {
+            if (isPointerLockCooldown && e.target.closest('canvas')) {
+                e.stopPropagation(); // Zatrzymuje zdarzenie - A-Frame nie wywoła błędu
+            }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+            if (event.reason && event.reason.name === 'SecurityError' && (event.reason.message.includes('Pointer lock') || event.reason.message.includes('pointer lock'))) {
+                event.preventDefault(); // Zapasowe ukrycie błędu
+            }
+        });
+
         // --- LOGIKA APLIKACJI VR ---
 
-        // Dane lekcji - Zaktualizowane długie tytuły
         const lessons = [
             { id: 1, title: "Lekcja 1: Prawda czy falsz? Rozpoznawanie dezinformacji i mroczna strona sieci", videoId: "vid1" },
             { id: 2, title: "Lekcja 2: Bialy Wywiad (OSINT) i anatomia oszustwa", videoId: "vid2" },
@@ -36,7 +60,6 @@
         let currentLessonIndex = 0;
         let activeVideoElement = null;
 
-        // BRUTALNY FIX: Komponent zmuszający teksturę na obiekcie 3D do odświeżania się co klatkę (likwiduje czarny ekran)
         AFRAME.registerComponent('force-video-update', {
             tick: function () {
                 var mesh = this.el.getObject3D('mesh');
@@ -46,39 +69,33 @@
             }
         });
 
-        // Komponent do obsługi interaktywnych przycisków (efekt najechania)
         AFRAME.registerComponent('button-visuals', {
             init: function () {
                 var el = this.el;
                 var defaultColor = el.getAttribute('material').color;
                 
                 el.addEventListener('mouseenter', function () {
-                    el.setAttribute('color', '#ffaa00'); // Kolor podświetlenia
+                    el.setAttribute('color', '#ffaa00');
                 });
                 
                 el.addEventListener('mouseleave', function () {
-                    el.setAttribute('color', defaultColor); // Powrót do oryginału
+                    el.setAttribute('color', defaultColor);
                 });
             }
         });
 
-        // Główny kontroler aplikacji
         AFRAME.registerComponent('app-controller', {
             init: function () {
                 this.bookTitle = document.querySelector('#book-lesson-title');
                 this.welcomeText = document.querySelector('#welcome-text');
-                
-                // Pobieramy wszystkie ekrany wideo zamiast jednego (dla stabilności tekstur)
                 this.videoScreens = document.querySelectorAll('.video-screen');
                 
                 this.updateBookUI();
 
-                // Obsługa nowych przycisków książki (Strzałki)
                 document.querySelector('#btn-prev-arrow').addEventListener('click', () => this.changeLesson(-1));
                 document.querySelector('#btn-next-arrow').addEventListener('click', () => this.changeLesson(1));
                 document.querySelector('#btn-select').addEventListener('click', () => this.playLesson());
 
-                // Obsługa przycisków panelu sterowania
                 document.querySelector('#btn-playpause').addEventListener('click', () => this.togglePlayPause());
                 document.querySelector('#btn-restart').addEventListener('click', () => this.restartVideo());
                 document.querySelector('#btn-vol-down').addEventListener('click', () => this.changeVolume(-0.2));
@@ -97,7 +114,6 @@
             },
 
             playLesson: function() {
-                // Zatrzymaj poprzedni film jeśli grał
                 if (activeVideoElement) {
                     activeVideoElement.pause();
                 }
@@ -105,18 +121,15 @@
                 const lesson = lessons[currentLessonIndex];
                 activeVideoElement = document.querySelector('#' + lesson.videoId);
                 
-                // Ukryj tekst powitalny i przywróć jego domyślny kolor (jeśli był błąd)
                 this.welcomeText.setAttribute('visible', 'false');
                 this.welcomeText.setAttribute('color', '#ffffff');
                 
-                // Ukryj wszystkie ekrany wideo, a następnie pokaż tylko ten właściwy
                 this.videoScreens.forEach(screen => screen.setAttribute('visible', 'false'));
                 let activeScreen = document.querySelector('#screen-' + lesson.videoId);
                 if (activeScreen) {
                     activeScreen.setAttribute('visible', 'true');
                 }
 
-                // Podepnij nasłuchiwanie na błędy wideo
                 activeVideoElement.onerror = () => {
                     if (activeScreen) activeScreen.setAttribute('visible', 'false');
                     this.welcomeText.setAttribute('value', 'BLAD LADOWANIA WIDEO!\n\nUpewnij sie, ze film ma wlasciwy kodek (H.264)\ni plik znajduje sie w tym samym folderze.');
@@ -124,18 +137,16 @@
                     this.welcomeText.setAttribute('visible', 'true');
                 };
 
-                // Odtwórz film
                 activeVideoElement.currentTime = 0;
-                activeVideoElement.volume = 0.5; // Domyślna głośność
+                activeVideoElement.volume = 0.5;
                 
-                // Opóźnienie startu o ułamek sekundy, aby tekstura zdążyła się przygotować
                 setTimeout(() => {
                     let playPromise = activeVideoElement.play();
                     if (playPromise !== undefined) {
                         playPromise.catch(error => {
                             console.warn("Błąd odtwarzania wideo:", error);
                             if (activeScreen) activeScreen.setAttribute('visible', 'false');
-                            this.welcomeText.setAttribute('value', 'BLAD ODTWARZANIA!\n\nPrzegladarka zablokowala obraz (Uzyj rozszerzenia Live Server w edytorze kodu).\n' + error.message);
+                            this.welcomeText.setAttribute('value', 'BLAD ODTWARZANIA!\n\nPrzegladarka zablokowala obraz.\n' + error.message);
                             this.welcomeText.setAttribute('color', '#ff4444');
                             this.welcomeText.setAttribute('visible', 'true');
                         });
@@ -148,7 +159,7 @@
                 if (activeVideoElement.paused) {
                     let playPromise = activeVideoElement.play();
                     if (playPromise !== undefined) {
-                        playPromise.catch(error => console.warn("Błąd wznawiania wideo:", error));
+                        playPromise.catch(error => console.warn("Błąd wznawiania:", error));
                     }
                 } else {
                     activeVideoElement.pause();
@@ -160,7 +171,7 @@
                 activeVideoElement.currentTime = 0;
                 let playPromise = activeVideoElement.play();
                 if (playPromise !== undefined) {
-                    playPromise.catch(error => console.warn("Błąd restartu wideo:", error));
+                    playPromise.catch(error => console.warn("Błąd restartu:", error));
                 }
             },
 
@@ -173,7 +184,6 @@
             }
         });
 
-        // Skrypt do dynamicznego generowania ławek w klasie
         AFRAME.registerComponent('generate-desks', {
             init: function () {
                 const scene = this.el;
@@ -186,22 +196,19 @@
 
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
-                        // Pomiń miejsce, w którym siedzi gracz (środek)
                         if (r === 1 && c === 2) continue;
 
                         let x = startX + (c * spacingX);
                         let z = startZ + (r * spacingZ);
 
-                        // Tworzenie blatu biurka
                         let desk = document.createElement('a-box');
                         desk.setAttribute('position', `${x} 0.7 ${z}`);
                         desk.setAttribute('width', '1.2');
                         desk.setAttribute('height', '0.05');
                         desk.setAttribute('depth', '0.6');
-                        desk.setAttribute('color', '#8b5a2b'); // Drewno
+                        desk.setAttribute('color', '#8b5a2b');
                         scene.appendChild(desk);
 
-                        // Nogi biurka
                         let legOffset = 0.5;
                         let depthOffset = 0.25;
                         const positions = [
@@ -224,7 +231,6 @@
             }
         });
 
-        // Skrypt: Blokada przechodzenia przez ściany (Niewidzialna bariera)
         AFRAME.registerComponent('classroom-bounds', {
             tick: function () {
                 var pos = this.el.object3D.position;
@@ -241,23 +247,21 @@
     <div id="ui-overlay">
         <button id="close-ui-btn" style="float: right; background: #e74c3c; color: white; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-weight: bold;">X</button>
         <h3 style="margin-top: 0;">Wirtualna Klasa - Projekt Mendi</h3>
-        <p><b>Instrukcja:</b></p>
-        <p>1. Użyj myszki (przeciągnij), aby się rozejrzeć.</p>
-        <p>2. Skieruj białą kropkę (kursor) na przyciski na biurku.</p>
-        <p>3. Kliknij lewym przyciskiem myszy, aby wejść w interakcję.</p>
-        <p style="font-size: 12px; color: #ffaa00;">*Jeżeli masz czarny ekran z dźwiękiem, uruchom plik przez Live Server, a nie dwuklikiem.</p>
+        <p><b>Instrukcja (Nowe Sterowanie):</b></p>
+        <p>1. <b>Kliknij lewym w ekran</b>, aby zablokować kursor (jak w grach FPS).</p>
+        <p>2. Rozglądaj się poruszając myszą (bez wciskania przycisku).</p>
+        <p>3. Skieruj kropkę na książkę i <b>kliknij lewym</b>.</p>
+        <p style="font-size: 13px; color: #00ffff;">*Aby odzyskać myszkę i ukryć to okno, wciśnij klawisz <b>ESC</b> na klawiaturze.</p>
     </div>
     <script>
-        // Skrypt do ukrywania instrukcji po kliknięciu X
         document.querySelector('#close-ui-btn').addEventListener('click', function() {
             document.querySelector('#ui-overlay').style.display = 'none';
         });
     </script>
 
-    <!-- Główna Scena VR -->
-    <a-scene app-controller generate-desks cursor="rayOrigin: mouse">
+    <!-- ZMIANA: Usunięto cursor="rayOrigin: mouse", bo gryzł się z celownikiem na środku ekranu! -->
+    <a-scene app-controller generate-desks>
         
-        <!-- Zasoby (Filmy, Tekstury) -->
         <a-assets>
             <video id="vid1" src="film1.mp4" preload="auto" playsinline webkit-playsinline type="video/mp4"></video>
             <video id="vid2" src="film2.mp4" preload="auto" playsinline webkit-playsinline type="video/mp4"></video>
@@ -265,108 +269,78 @@
             <video id="vid4" src="film4.mp4" preload="auto" playsinline webkit-playsinline type="video/mp4"></video>
         </a-assets>
 
-        <!-- --- ŚRODOWISKO (KLASA) --- -->
-        <!-- Podłoga -->
         <a-plane position="0 0 0" rotation="-90 0 0" width="15" height="15" color="#5c4033"></a-plane>
         
-        <!-- Ściany -->
-        <!-- Przednia ściana -->
         <a-plane position="0 2 -5" width="15" height="4" color="#f5f5dc"></a-plane>
-        <!-- Tylna ściana -->
         <a-plane position="0 2 5" rotation="0 180 0" width="15" height="4" color="#f5f5dc"></a-plane>
-        <!-- Lewa ściana -->
         <a-plane position="-7.5 2 0" rotation="0 90 0" width="10" height="4" color="#eaddb6"></a-plane>
-        <!-- Prawa ściana -->
         <a-plane position="7.5 2 0" rotation="0 -90 0" width="10" height="4" color="#eaddb6"></a-plane>
-        <!-- Sufit -->
         <a-plane position="0 4 0" rotation="90 0 0" width="15" height="15" color="#ffffff"></a-plane>
 
-        <!-- Oświetlenie -->
         <a-light type="ambient" color="#dddddd"></a-light>
         <a-light type="point" intensity="0.5" position="0 3 0"></a-light>
 
         <!-- Tablica (Ramy i Tło) -->
-        <a-box position="0 2 -4.9" width="6.2" height="3.2" depth="0.1" color="#3b2f2f"></a-box> <!-- Rama -->
-        <a-plane position="0 2 -4.84" width="6" height="3" color="#1a4a28"></a-plane> <!-- Ciemnozielona tablica -->
+        <a-box position="0 2 -4.9" width="6.2" height="3.2" depth="0.1" color="#3b2f2f"></a-box>
+        <a-plane position="0 2 -4.84" width="6" height="3" color="#1a4a28"></a-plane>
         
-        <!-- Tekst powitalny na tablicy przed włączeniem filmu -->
         <a-text id="welcome-text" value="WITAJ W WIRTUALNEJ KLASIE MENDIEGO!\n\nWybierz lekcje z ksiazki na biurku." position="0 2 -4.8" align="center" color="#ffffff" width="6"></a-text>
         
-        <!-- Odtwarzacze wideo (Bezpośrednie płaszczyzny z wymuszonym odświeżaniem tekstury!) -->
+        <!-- Odtwarzacze wideo -->
         <a-plane id="screen-vid1" class="video-screen" material="shader: flat; src: #vid1" position="0 2 -4.75" width="6" height="3" visible="false" force-video-update></a-plane>
         <a-plane id="screen-vid2" class="video-screen" material="shader: flat; src: #vid2" position="0 2 -4.75" width="6" height="3" visible="false" force-video-update></a-plane>
         <a-plane id="screen-vid3" class="video-screen" material="shader: flat; src: #vid3" position="0 2 -4.75" width="6" height="3" visible="false" force-video-update></a-plane>
         <a-plane id="screen-vid4" class="video-screen" material="shader: flat; src: #vid4" position="0 2 -4.75" width="6" height="3" visible="false" force-video-update></a-plane>
 
-        <!-- --- BIURKO NAUCZYCIELA --- -->
-        <!-- Przesunięte na bok (X: -4.5), żeby nie zasłaniać tablicy -->
+        <!-- Biurko nauczyciela -->
         <a-entity position="-4.5 0 -3.5" rotation="0 25 0">
-            <!-- Blat -->
             <a-box position="0 0.75 0" width="2.5" height="0.1" depth="1" color="#4a2e15"></a-box> 
-            <!-- Lewa i Prawa szafka -->
             <a-box position="-1.1 0.375 0" width="0.25" height="0.75" depth="0.9" color="#36220f"></a-box> 
             <a-box position="1.1 0.375 0" width="0.25" height="0.75" depth="0.9" color="#36220f"></a-box>
-            <!-- Przód biurka -->
             <a-box position="0 0.375 -0.3" width="2" height="0.75" depth="0.1" color="#36220f"></a-box> 
             
-            <!-- Laptop nauczyciela -->
             <a-box position="0.6 0.82 0" width="0.4" height="0.02" depth="0.3" color="#c0c0c0" rotation="0 -20 0"></a-box>
             <a-box position="0.55 0.95 -0.12" width="0.4" height="0.25" depth="0.02" color="#111" rotation="-15 -20 0"></a-box>
             
-            <!-- Ozdobny kwiatek -->
             <a-cylinder position="-1 0.85 0.2" radius="0.08" height="0.15" color="#fff"></a-cylinder>
             <a-sphere position="-1 1.05 0.2" radius="0.12" color="#27ae60"></a-sphere>
         </a-entity>
 
-        <!-- --- BIURKO GRACZA (ŚRODEK KLASY) --- -->
-        <!-- Pozycja 0 0.7 1 (Gracz siedzi przy 0 0 1.5, patrząc na Z ujemne) -->
-        <!-- Blat -->
+        <!-- Biurko Gracza -->
         <a-box position="0 0.7 1" width="1.6" height="0.05" depth="0.8" color="#8b5a2b"></a-box>
-        <!-- Nogi biurka gracza -->
         <a-cylinder position="-0.7 0.35 0.7" radius="0.03" height="0.7" color="#555555"></a-cylinder>
         <a-cylinder position="0.7 0.35 0.7" radius="0.03" height="0.7" color="#555555"></a-cylinder>
         <a-cylinder position="-0.7 0.35 1.3" radius="0.03" height="0.7" color="#555555"></a-cylinder>
         <a-cylinder position="0.7 0.35 1.3" radius="0.03" height="0.7" color="#555555"></a-cylinder>
 
-        <!-- --- INTERAKTYWNA KSIĄŻKA (NOWOCZESNY E-BOOK) --- -->
+        <!-- E-book -->
         <a-entity position="-0.4 0.73 0.9" rotation="-5 15 0">
-            <!-- Okładka e-booka / cienka baza -->
             <a-box position="0 0 0" width="0.7" height="0.01" depth="0.45" color="#111111"></a-box>
-            <!-- Jasne Ekrany lewy i prawy -->
             <a-plane position="-0.17 0.006 0" rotation="-90 0 0" width="0.32" height="0.41" color="#f8f9fa"></a-plane>
             <a-plane position="0.17 0.006 0" rotation="-90 0 0" width="0.32" height="0.41" color="#f8f9fa"></a-plane>
-            
-            <!-- Środek (imitacja zawiasu) -->
             <a-cylinder position="0 0.005 0" rotation="90 0 0" radius="0.005" height="0.43" color="#333333"></a-cylinder>
 
-            <!-- LEWA STRONA -->
             <a-text value="MENU LEKCJI" position="-0.17 0.012 -0.12" rotation="-90 0 0" align="center" color="#34495e" width="0.25"></a-text>
             <a-box id="btn-prev-arrow" class="clickable" button-visuals position="-0.17 0.01 0.05" width="0.12" height="0.005" depth="0.08" color="#ecf0f1">
                 <a-text value="< POPRZEDNIA" position="0 0.005 0" rotation="-90 0 0" align="center" color="#2c3e50" width="0.8"></a-text>
             </a-box>
 
-            <!-- PRAWA STRONA -->
             <a-text id="book-lesson-title" value="Lekcja 1" position="0.17 0.012 -0.08" rotation="-90 0 0" align="center" color="#2980b9" width="0.28" wrap-count="20" baseline="top"></a-text>
-            
             <a-box id="btn-next-arrow" class="clickable" button-visuals position="0.17 0.01 0.06" width="0.12" height="0.005" depth="0.08" color="#ecf0f1">
                 <a-text value="NASTEPNA >" position="0 0.005 0" rotation="-90 0 0" align="center" color="#2c3e50" width="0.8"></a-text>
             </a-box>
-
             <a-box id="btn-select" class="clickable" button-visuals position="0.17 0.01 0.16" width="0.18" height="0.005" depth="0.06" color="#27ae60">
                 <a-text value="ODTWORZ" position="0 0.005 0" rotation="-90 0 0" align="center" color="#fff" width="0.9"></a-text>
             </a-box>
         </a-entity>
 
-        <!-- --- PANEL STEROWANIA WIDEO (NOWOCZESNY TABLET) --- -->
+        <!-- Tablet -->
         <a-entity position="0.45 0.73 0.95" rotation="-5 -15 0">
-            <!-- Obudowa tabletu (iPad style) -->
             <a-box position="0 0 0" width="0.5" height="0.01" depth="0.35" color="#1e272e"></a-box>
-            <!-- Ekran -->
             <a-plane position="0 0.006 0" rotation="-90 0 0" width="0.47" height="0.32" color="#2f3640"></a-plane>
             
             <a-text value="PANEL KONTROLNY" position="0 0.01 -0.12" rotation="-90 0 0" align="center" color="#00a8ff" width="1.5" font="kelsonsans"></a-text>
 
-            <!-- Górny rząd przycisków -->
             <a-box id="btn-playpause" class="clickable" button-visuals position="-0.13 0.01 -0.02" width="0.2" height="0.005" depth="0.08" color="#0097e6">
                 <a-text value="GRAJ / PAUZA" position="0 0.005 0" rotation="-90 0 0" align="center" color="#fff" width="1"></a-text>
             </a-box>
@@ -374,7 +348,6 @@
                 <a-text value="RESTART" position="0 0.005 0" rotation="-90 0 0" align="center" color="#fff" width="1"></a-text>
             </a-box>
 
-            <!-- Dolny rząd przycisków (Głośność) -->
             <a-box id="btn-vol-down" class="clickable" button-visuals position="-0.13 0.01 0.09" width="0.2" height="0.005" depth="0.08" color="#718093">
                 <a-text value="CISZEJ (-)" position="0 0.005 0" rotation="-90 0 0" align="center" color="#fff" width="1.1"></a-text>
             </a-box>
@@ -383,23 +356,21 @@
             </a-box>
         </a-entity>
 
-        <!-- --- GRACZ / KAMERA --- -->
-        <!-- Rig kontroluje pozycję całego gracza. Y=0 to poziom podłogi. -->
+        <!-- GRACZ / KAMERA -->
         <a-entity id="player-rig" position="0 0 1.5" classroom-bounds> 
-            <a-camera position="0 1.1 0" look-controls="pointerLockEnabled: false" wasd-controls="enabled: true; acceleration: 20">
-                <!-- Wirtualny kursor -->
+            <!-- ZMIANA: pointerLockEnabled: true (Styl gier FPS, kliknięcie blokuje myszkę) -->
+            <a-camera position="0 1.1 0" look-controls="pointerLockEnabled: true" wasd-controls="enabled: true; acceleration: 20">
+                <!-- ZMIANA: Kursor przysunięty b. blisko kamery (Z: -0.15), pomniejszony, dodany depthTest: false (zawsze rysuje się NA WIERZCHU) -->
                 <a-entity cursor="fuse: false"
-                          position="0 0 -1"
-                          geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
-                          material="color: white; shader: flat"
+                          position="0 0 -0.15"
+                          geometry="primitive: ring; radiusInner: 0.003; radiusOuter: 0.0045"
+                          material="color: white; shader: flat; depthTest: false"
                           animation__click="property: scale; startEvents: click; easing: easeInCubic; dur: 150; from: 0.1 0.1 0.1; to: 1 1 1"
-                          animation__fusing="property: scale; startEvents: fusing; easing: easeInCubic; dur: 1500; from: 1 1 1; to: 0.1 0.1 0.1"
                           animation__mouseleave="property: scale; startEvents: mouseleave; easing: easeInCubic; dur: 500; to: 1 1 1"
-                          raycaster="objects: .clickable">
+                          raycaster="objects: .clickable; near: 0; far: 5">
                 </a-entity>
             </a-camera>
             
-            <!-- Kontrolery VR dla dłoni -->
             <a-entity laser-controls="hand: left" raycaster="objects: .clickable"></a-entity>
             <a-entity laser-controls="hand: right" raycaster="objects: .clickable"></a-entity>
         </a-entity>
